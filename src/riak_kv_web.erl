@@ -116,7 +116,10 @@ raw_dispatch(Name) ->
       riak_kv_wm_link_walker, Props},
 
      {Prefix ++ ["buckets", bucket, "index", field, '*'],
-      riak_kv_wm_index, Props}
+      riak_kv_wm_index, Props},
+
+     {Prefix ++ ["ring", "vnodes"],
+      riak_kv_wm_ring, Props}
 
     ] || {Prefix, Props} <- Props2 ]).
 
