@@ -43,6 +43,7 @@
 
 -include_lib("webmachine/include/webmachine.hrl").
 
+-type wm_reqdata() :: #wm_reqdata{}.
 -type unixtime() :: non_neg_integer().
 
 -define(DEFAULT_CACHE_EXPIRY_TIME, 15).
@@ -52,13 +53,14 @@
               last_cached =  0 :: unixtime(),
               expiry_time = ?DEFAULT_CACHE_EXPIRY_TIME :: unixtime()
              }).
+-type ctx() :: #ctx{}.
 
 
 %% ===================================================================
 %% Webmachine API
 %% ===================================================================
 
--spec init(list()) -> {ok, #ctx{}}.
+-spec init(list()) -> {ok, ctx()}.
 init(Props) ->
     {ok, #ctx{expiry_time =
                   proplists:get_value(
@@ -66,8 +68,8 @@ init(Props) ->
                     ?DEFAULT_CACHE_EXPIRY_TIME)}}.
 
 
--spec is_authorized(#wm_reqdata{}, #ctx{}) ->
-    {term(), #wm_reqdata{}, #ctx{}}.
+-spec is_authorized(wm_reqdata(), ctx()) ->
+    {term(), wm_reqdata(), ctx()}.
 is_authorized(RD, Ctx) ->
     case riak_api_web_security:is_authorized(RD) of
         false ->
@@ -108,20 +110,20 @@ malformed_request(RD, Ctx) ->
     end.
 
 
--spec allowed_methods(#wm_reqdata{}, #ctx{}) ->
-    {[atom()], #wm_reqdata{}, #ctx{}}.
+-spec allowed_methods(wm_reqdata(), ctx()) ->
+    {[atom()], wm_reqdata(), ctx()}.
 allowed_methods(RD, Ctx) ->
     {['GET'], RD, Ctx}.
 
 
--spec content_types_provided(#wm_reqdata{}, #ctx{}) ->
-    {[{string(), atom()}], #wm_reqdata{}, #ctx{}}.
+-spec content_types_provided(wm_reqdata(), ctx()) ->
+    {[{string(), atom()}], wm_reqdata(), ctx()}.
 content_types_provided(RD, Ctx) ->
     {[{"application/json", make_response}], RD, Ctx}.
 
 
--spec make_response(#wm_reqdata{}, #ctx{}) ->
-    {iolist(), #wm_reqdata{}, #ctx{}}.
+-spec make_response(wm_reqdata(), ctx()) ->
+    {iolist(), wm_reqdata(), ctx()}.
 make_response(RD, Ctx) ->
     case Ctx#ctx.cached_response /= undefined andalso
         Ctx#ctx.last_cached + Ctx#ctx.expiry_time < unixtime() of
@@ -144,8 +146,8 @@ error_response(Msg, RD) ->
       wrq:append_to_response_body(Msg, RD)).
 
 
--spec make_json(#ctx{}) -> {iolist(), unixtime()}.
 make_json(Ctx) ->
+-spec make_json(ctx()) -> {iolist(), unixtime()}.
     {Vnodes, ValidPer} = get_vnodes(Ctx),
     {mochijson2:encode(
        {struct, [{H, {struct, [{port, P}, {vnodes, VV}]}}
@@ -153,7 +155,7 @@ make_json(Ctx) ->
      ValidPer}.
 
 
--spec get_vnodes(#ctx{}) -> {list(), unixtime()}.
+-spec get_vnodes(ctx()) -> {list(), unixtime()}.
 get_vnodes(_Ctx) ->
     %% TODO: Details = riak_core_apl:get_apl(
     Details = [{localhost, 8989, [dev8, dev9]}],
