@@ -141,6 +141,7 @@ make_response(RD, Ctx) ->
 %% ===================================================================
 
 error_response(Msg, RD) ->
+    lager:log(warning, self(), Msg),
     wrq:set_resp_header(
       "Content-Type", "text/plain",
       wrq:append_to_response_body(Msg, RD)).
