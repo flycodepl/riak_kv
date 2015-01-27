@@ -130,7 +130,7 @@ make_response(RD, Ctx) ->
         true ->
             {Ctx#ctx.cached_response, RD, Ctx};
         false ->
-            {Response, ValidPer} = make_json(Ctx),
+            {Response, ValidPer} = to_json(Ctx),
             {Response, RD, Ctx#ctx{cached_response = Response,
                                    last_cached = ValidPer}}
     end.
@@ -146,8 +146,8 @@ error_response(Msg, RD) ->
       wrq:append_to_response_body(Msg, RD)).
 
 
-make_json(Ctx) ->
--spec make_json(ctx()) -> {iolist(), unixtime()}.
+-spec to_json(ctx()) -> {iolist(), unixtime()}.
+to_json(Ctx) ->
     {Vnodes, ValidPer} = get_vnodes(Ctx),
     {mochijson2:encode(
        {struct, [{H, {struct, [{port, P}, {vnodes, VV}]}}
