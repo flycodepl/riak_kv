@@ -28,6 +28,9 @@
 %%   Return a map of riak vnodes to hosts they are running on,
 %%   as JSON object like this:
 %%     `{"host1": {"port":8989, "vnodes":["dev1@host1", "dev2@host1", ...]}, ...}'
+%%
+%%   By default, returned value is cached for 15 seconds (configurable
+%%   via ring_vnodes_cache_expiry_time init parameter).
 
 -module(riak_kv_wm_ring).
 
@@ -83,6 +86,8 @@ is_authorized(RD, Ctx) ->
     end.
 
 
+-spec malformed_request(wm_reqdata(), ctx()) ->
+    {boolean(), wm_reqdata(), ctx()}.
 malformed_request(RD, Ctx) ->
     case wrq:get_qs_value("nvalue", undefined, RD) of
         undefined ->
@@ -127,11 +132,15 @@ content_types_provided(RD, Ctx) ->
 make_response(RD, Ctx) ->
     {to_json(Ctx), RD, Ctx}.
 
+-spec last_modified(wm_reqdata(), ctx()) ->
+    {string(), wm_reqdata(), ctx()}.
 last_modified(RD, Ctx = #ctx{expiry_time = Exp}) ->
     {calendar:gregorian_seconds_to_datetime(
        719528 * 86400  %% seconds in 1970 years since 0 AD (man calendar)
        + cached_timebin(Exp)), RD, Ctx}.
 
+-spec generate_etag(wm_reqdata(), ctx()) ->
+    {string(), wm_reqdata(), ctx()}.
 generate_etag(RD, Ctx = #ctx{expiry_time = Exp}) ->
     {riak_core_util:integer_to_list(cached_timebin(Exp), 62), RD, Ctx}.
 
@@ -140,6 +149,9 @@ generate_etag(RD, Ctx = #ctx{expiry_time = Exp}) ->
 %% Supporting functions
 %% ===================================================================
 
+-spec error_response(string(), wm_reqdata()) ->
+    wm_reqdata().
+%% @doc Wrap wrq:set_resp_header() and log a warning as a side-effect
 error_response(Msg, RD) ->
     lager:log(warning, self(), Msg),
     wrq:set_resp_header(
@@ -148,6 +160,7 @@ error_response(Msg, RD) ->
 
 
 -spec to_json(ctx()) -> iolist().
+%% @doc Produce requested vnode mappings in a JSON form.
 to_json(Ctx) ->
     Vnodes = get_vnodes(Ctx),
     mochijson2:encode(
@@ -156,16 +169,21 @@ to_json(Ctx) ->
 
 
 -spec get_vnodes(ctx()) -> list().
+%% @doc Get the vnode mappings, for use in riak_kv_{wm,pb}_ring.
 get_vnodes(_Ctx) ->
     %% TODO: Details = riak_core_apl:get_apl(
     [{localhost, 8989, [dev8, dev9]}].
 
 
 -spec unixtime() -> unixtime().
+%% @doc Return current unixtime.
 unixtime() ->
     {NowMega, NowSec, _} = os:timestamp(),
     NowMega * 1000 * 1000 + NowSec.
 
 -spec cached_timebin(non_neg_integer()) -> unixtime().
+%% #doc Get the timestamp of an epoch for which the obtained value of
+%%      get_vnodes will be deemed valid.  It is simply a multiple of
+%%      Binsize seconds.  It is used as a suitable ETag mark.
 cached_timebin(Binsize) ->
     round(unixtime() / Binsize) * Binsize.
