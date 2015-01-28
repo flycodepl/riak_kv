@@ -38,6 +38,8 @@
          allowed_methods/2,
          content_types_provided/2,
          malformed_request/2,
+         last_modified/2,
+         generate_etag/2,
          make_response/2
         ]).
 
@@ -49,8 +51,6 @@
 -define(DEFAULT_CACHE_EXPIRY_TIME, 15).
 
 -record(ctx, {nvalue :: non_neg_integer(),
-              cached_response  :: list() | undefined,
-              last_cached =  0 :: unixtime(),
               expiry_time = ?DEFAULT_CACHE_EXPIRY_TIME :: unixtime()
              }).
 -type ctx() :: #ctx{}.
@@ -125,15 +125,15 @@ content_types_provided(RD, Ctx) ->
 -spec make_response(wm_reqdata(), ctx()) ->
     {iolist(), wm_reqdata(), ctx()}.
 make_response(RD, Ctx) ->
-    case Ctx#ctx.cached_response /= undefined andalso
-        Ctx#ctx.last_cached + Ctx#ctx.expiry_time < unixtime() of
-        true ->
-            {Ctx#ctx.cached_response, RD, Ctx};
-        false ->
-            {Response, ValidPer} = to_json(Ctx),
-            {Response, RD, Ctx#ctx{cached_response = Response,
-                                   last_cached = ValidPer}}
-    end.
+    {to_json(Ctx), RD, Ctx}.
+
+last_modified(RD, Ctx = #ctx{expiry_time = Exp}) ->
+    {calendar:gregorian_seconds_to_datetime(
+       719528 * 86400  %% seconds in 1970 years since 0 AD (man calendar)
+       + cached_timebin(Exp)), RD, Ctx}.
+
+generate_etag(RD, Ctx = #ctx{expiry_time = Exp}) ->
+    {riak_core_util:integer_to_list(cached_timebin(Exp), 62), RD, Ctx}.
 
 
 %% ===================================================================
@@ -147,23 +147,25 @@ error_response(Msg, RD) ->
       wrq:append_to_response_body(Msg, RD)).
 
 
--spec to_json(ctx()) -> {iolist(), unixtime()}.
+-spec to_json(ctx()) -> iolist().
 to_json(Ctx) ->
-    {Vnodes, ValidPer} = get_vnodes(Ctx),
-    {mochijson2:encode(
+    Vnodes = get_vnodes(Ctx),
+    mochijson2:encode(
        {struct, [{H, {struct, [{port, P}, {vnodes, VV}]}}
-                 || {H, P, VV} <- Vnodes]}),
-     ValidPer}.
+                 || {H, P, VV} <- Vnodes]}).
 
 
--spec get_vnodes(ctx()) -> {list(), unixtime()}.
+-spec get_vnodes(ctx()) -> list().
 get_vnodes(_Ctx) ->
     %% TODO: Details = riak_core_apl:get_apl(
-    Details = [{localhost, 8989, [dev8, dev9]}],
-    {Details, unixtime()}.
+    [{localhost, 8989, [dev8, dev9]}].
 
 
 -spec unixtime() -> unixtime().
 unixtime() ->
     {NowMega, NowSec, _} = os:timestamp(),
     NowMega * 1000 * 1000 + NowSec.
+
+-spec cached_timebin(non_neg_integer()) -> unixtime().
+cached_timebin(Binsize) ->
+    round(unixtime() / Binsize) * Binsize.
