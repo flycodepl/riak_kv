@@ -1,6 +1,8 @@
 %% -------------------------------------------------------------------
 %%
-%% riak_kv_wm_ping: simple Webmachine resource for availability test
+%% riak_kv_wm_ring: Webmachine resource providing a `location service'
+%%                  to external clients for optimal access to hosts
+%%                  with partitions containing known buckets/key.
 %%
 %% Copyright (c) 2014 Basho Technologies, Inc.  All Rights Reserved.
 %%
@@ -20,17 +22,24 @@
 %%
 %% -------------------------------------------------------------------
 
-%% @doc Webmachine resource describing ring constituent vnodes
-%%      and hosts these reside on
-%% ```
-%% GET /ring/vnodes'''
+%% @doc Webmachine resource providing a `location service' to external
+%%      clients for optimal access to hosts with partitions containing
+%%      known buckets/key ranges.
 %%
-%%   Return a map of riak vnodes to hosts they are running on,
-%%   as JSON object like this:
-%%     `{"host1": {"port":8989, "vnodes":["dev1@host1", "dev2@host1", ...]}, ...}'
+%%  ```
+%%  GET /ring/coverage?bucket=BUCKET&key=KEY&proto=PROTO'''
+%%
+%%   For known bucket and key, return host:port of http and pb API
+%%   entry points at riak nodes containing the data, as JSON
+%%   object like this:
+%%
+%%    `{"Host1": {"ports":[Port1]}}'
 %%
 %%   By default, returned value is cached for 15 seconds (configurable
 %%   via ring_vnodes_cache_expiry_time init parameter).
+%%
+%%   Request parameters can be used to restrict the map to only those vnodes
+%%   containing certain buckets and keys.
 
 -module(riak_kv_wm_ring).
 
@@ -53,7 +62,9 @@
 
 -define(DEFAULT_CACHE_EXPIRY_TIME, 15).
 
--record(ctx, {nvalue :: non_neg_integer(),
+-record(ctx, {bucket :: string(),
+              key :: string(),
+              proto = pb :: http|pb,
               expiry_time = ?DEFAULT_CACHE_EXPIRY_TIME :: unixtime()
              }).
 -type ctx() :: #ctx{}.
@@ -89,29 +100,41 @@ is_authorized(RD, Ctx) ->
 -spec malformed_request(wm_reqdata(), ctx()) ->
     {boolean(), wm_reqdata(), ctx()}.
 malformed_request(RD, Ctx) ->
-    case wrq:get_qs_value("nvalue", undefined, RD) of
-        undefined ->
+    CheckMissingParm =
+        fun(P, undefined, _) ->
+                lager:warning(self(), "missing required parameter ~s", [P]),
+                false;
+           (_, _, _) ->
+                true
+        end,
+    CheckOptionalParm =
+        fun(_, undefined, _) ->
+                true;
+           (P, V, VL) ->
+                lists:member(V, VL) orelse
+                    begin
+                        lager:warning(self(), "parameter ~s must be one of ~9999p", [P, VL]),
+                        false
+                    end
+        end,
+    case lists:foldl(
+           fun({P, VL, F}, {AllValid, ValueAcc}) ->
+                   V = wrq:get_qs_value(P, hd(VL), RD),
+                   {F(P, V, VL) andalso AllValid, [{P, V} | ValueAcc]}
+           end,
+           {true, []},
+           [{"bucket", [undefined], CheckMissingParm},
+            {"key",    [undefined], CheckMissingParm},
+            {"proto",  ["pb", "http"], CheckOptionalParm}]) of
+        {true, AssignedList} ->
+            F = fun(P) -> proplists:get_value(P, AssignedList) end,
+            {false, RD, Ctx#ctx{bucket = F("bucket"),
+                                key    = F("key"),
+                                proto  = list_to_atom(F("proto"))}};
+        _ ->
             {true,
-             error_response("missing required parameter nvalue\n", RD),
-             Ctx};
-        Defined ->
-            try list_to_integer(Defined) of
-                Valid when Valid > 0 ->
-                    {false, RD, Ctx#ctx{nvalue = Valid}};
-                Invalid ->
-                    {true,
-                     error_response(
-                       io_lib:format("invalid nvalue (~b)\n", [Invalid]),
-                       RD),
-                     Ctx}
-            catch
-                error:badarg ->
-                    {true,
-                     error_response(
-                       io_lib:format("invalid nvalue (~p)\n", [Defined]),
-                       RD),
-                     Ctx}
-            end
+             error_response("invalid/insufficient parameters", RD),
+             Ctx}
     end.
 
 
@@ -129,8 +152,8 @@ content_types_provided(RD, Ctx) ->
 
 -spec make_response(wm_reqdata(), ctx()) ->
     {iolist(), wm_reqdata(), ctx()}.
-make_response(RD, Ctx) ->
-    {to_json(Ctx), RD, Ctx}.
+make_response(RD, Ctx = #ctx{proto = Proto, bucket = Bucket, key = Key}) ->
+    {riak_kv_wm_ring_lib:get_endpoints_json(Proto, {Bucket, Key}), RD, Ctx}.
 
 -spec last_modified(wm_reqdata(), ctx()) ->
     {string(), wm_reqdata(), ctx()}.
@@ -146,33 +169,20 @@ generate_etag(RD, Ctx = #ctx{expiry_time = Exp}) ->
 
 
 %% ===================================================================
-%% Supporting functions
+%% Local functions
 %% ===================================================================
 
 -spec error_response(string(), wm_reqdata()) ->
     wm_reqdata().
 %% @doc Wrap wrq:set_resp_header() and log a warning as a side-effect
 error_response(Msg, RD) ->
-    lager:log(warning, self(), Msg),
+    lager:log(
+      warning, self(),
+      "bad request ~p from ~s: ~s",
+      [RD#wm_reqdata.path, RD#wm_reqdata.peer, Msg]),
     wrq:set_resp_header(
       "Content-Type", "text/plain",
       wrq:append_to_response_body(Msg, RD)).
-
-
--spec to_json(ctx()) -> iolist().
-%% @doc Produce requested vnode mappings in a JSON form.
-to_json(Ctx) ->
-    Vnodes = get_vnodes(Ctx),
-    mochijson2:encode(
-       {struct, [{H, {struct, [{port, P}, {vnodes, VV}]}}
-                 || {H, P, VV} <- Vnodes]}).
-
-
--spec get_vnodes(ctx()) -> list().
-%% @doc Get the vnode mappings, for use in riak_kv_{wm,pb}_ring.
-get_vnodes(_Ctx) ->
-    %% TODO: Details = riak_core_apl:get_apl(
-    [{localhost, 8989, [dev8, dev9]}].
 
 
 -spec unixtime() -> unixtime().
@@ -187,3 +197,11 @@ unixtime() ->
 %%      Binsize seconds.  It is used as a suitable ETag mark.
 cached_timebin(Binsize) ->
     round(unixtime() / Binsize) * Binsize.
+
+
+%% ===================================================================
+%% EUnit tests
+%% ===================================================================
+-ifdef(TEST).
+%% TODO
+-endif.
