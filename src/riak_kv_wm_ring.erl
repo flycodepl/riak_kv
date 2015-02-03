@@ -27,7 +27,7 @@
 %%      known buckets/key ranges.
 %%
 %%  ```
-%%  GET /ring/coverage?bucket=BUCKET&key=KEY&proto=PROTO'''
+%%  GET /ring/coverage/bucket/BUCKET/key/KEY?proto=PROTO'''
 %%
 %%   For known bucket and key, return host:port of http and pb API
 %%   entry points at riak nodes containing the data, as JSON
@@ -100,20 +100,21 @@ is_authorized(RD, Ctx) ->
 -spec malformed_request(wm_reqdata(), ctx()) ->
     {boolean(), wm_reqdata(), ctx()}.
 malformed_request(RD, Ctx) ->
-    CheckMissingParm =
-        fun(P, undefined, _) ->
-                lager:warning(self(), "missing required parameter ~s", [P]),
-                false;
-           (_, _, _) ->
-                true
-        end,
+    %% 1. extract bucket and key from path
+    [Bucket, Key] =
+        [list_to_binary(
+           riak_kv_wm_utils:maybe_decode_uri(
+             RD, wrq:path_info(PathElement, RD)))
+         || PathElement <- [bucket, key]],
+    lager:log(info, self(), "bucket ~p key ~p", [Bucket, Key]),
+    %% 2. extract optional fields from parameters
     CheckOptionalParm =
         fun(_, undefined, _) ->
                 true;
            (P, V, VL) ->
                 lists:member(V, VL) orelse
                     begin
-                        lager:warning(self(), "parameter ~s must be one of ~9999p", [P, VL]),
+                        lager:log(warning, self(), "parameter ~s must be one of ~9999p", [P, VL]),
                         false
                     end
         end,
@@ -123,13 +124,12 @@ malformed_request(RD, Ctx) ->
                    {F(P, V, VL) andalso AllValid, [{P, V} | ValueAcc]}
            end,
            {true, []},
-           [{"bucket", [undefined], CheckMissingParm},
-            {"key",    [undefined], CheckMissingParm},
+           [%% placeholder for eventual new parameters
             {"proto",  ["pb", "http"], CheckOptionalParm}]) of
         {true, AssignedList} ->
             F = fun(P) -> proplists:get_value(P, AssignedList) end,
-            {false, RD, Ctx#ctx{bucket = F("bucket"),
-                                key    = F("key"),
+            {false, RD, Ctx#ctx{bucket = Bucket,
+                                key    = Key,
                                 proto  = list_to_atom(F("proto"))}};
         _ ->
             {true,

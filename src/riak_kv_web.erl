@@ -118,7 +118,7 @@ raw_dispatch(Name) ->
      {Prefix ++ ["buckets", bucket, "index", field, '*'],
       riak_kv_wm_index, Props},
 
-     {Prefix ++ ["ring", "coverage"],
+     {Prefix ++ ["ring", "coverage", "bucket", bucket, "key", key],
       riak_kv_wm_ring, Props}
 
     ] || {Prefix, Props} <- Props2 ]).
