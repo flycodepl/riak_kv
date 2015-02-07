@@ -29,7 +29,7 @@
 %% and secondary indexes (if supported).
 {mapping, "storage_backend", "riak_kv.storage_backend", [
   {default, {{storage_backend}} },
-  {datatype, {enum, [bitcask, leveldb, memory, multi]}}
+  {datatype, {enum, [bitcask, leveldb, memory, redis, multi]}}
 ]}.
 
 {translation,
@@ -40,8 +40,9 @@
       bitcask -> riak_kv_bitcask_backend;
       leveldb -> riak_kv_eleveldb_backend;
       memory -> riak_kv_memory_backend;
+      redis -> riak_kv_redis_backend;
       multi -> riak_kv_multi_backend;
-      _Default -> riak_kv_bitcask_backend
+      _Default -> riak_kv_redis_backend
     end
  end}.
 
@@ -372,6 +373,14 @@ end
   hidden
 ]}.
 
+
+%% @doc Redis DB host and port
+{mapping, "redis_backend.host", "riak_kv.redis_backend.host", [
+  {default, "127.0.0.1:6379"},
+  {datatype, ip},
+  {commented, "127.0.0.1:6379"}
+]}.
+
 %% @doc Measures were added to Riak 1.2 to counteract cross-site
 %% scripting and request-forgery attacks. Some reverse-proxies cannot
 %% remove the Referer header and make serving data directly from Riak
@@ -624,12 +633,5 @@ end
 {mapping, "bitcask.merge_check_jitter", "riak_kv.bitcask_merge_check_jitter", [
   {default, "30%"},
   {datatype, {percent, float}},
-  hidden
-]}.
-
-%% @doc Maximum amount of data to merge in one go in the Bitcask backend.
-{mapping, "bitcask.max_merge_size", "riak_kv.bitcask_max_merge_size", [
-  {default, "100GB"},
-  {datatype, bytesize},
   hidden
 ]}.
