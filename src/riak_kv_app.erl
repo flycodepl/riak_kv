@@ -35,7 +35,8 @@
                    {riak_kv_pb_index, 25, 26},   %% Secondary index requests
                    {riak_kv_pb_csbucket, 40, 41}, %%  CS bucket folding support
                    {riak_kv_pb_counter, 50, 53}, %% counter requests
-                   {riak_kv_pb_crdt, 80, 83} %% CRDT requests
+                   {riak_kv_pb_crdt, 80, 83}, %% CRDT requests
+                   {riak_kv_pb_apiep, 90, 91}  %% API entry points coverage
                   ]).
 -define(MAX_FLUSH_PUT_FSM_RETRIES, 10).
 

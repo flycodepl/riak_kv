@@ -119,7 +119,10 @@ raw_dispatch(Name) ->
       riak_kv_wm_link_walker, Props},
 
      {Prefix ++ ["buckets", bucket, "index", field, '*'],
-      riak_kv_wm_index, Props}
+      riak_kv_wm_index, Props},
+
+     {Prefix ++ ["ring", "coverage", "bucket", bucket, "key", key],
+      riak_kv_wm_apiep, Props}
 
     ] || {Prefix, Props} <- Props2 ]).
 
